@@ -160,33 +160,41 @@ namespace ARSoft.Tools.Net.Spf
 
 			if (!loadResult.CouldBeLoaded)
 			{
-				return new ValidationResult() { Result = loadResult.ErrorResult, Explanation = String.Empty };
+				return new ValidationResult() { Result = loadResult.ErrorResult, Explanation = "Records could not be loaded" };
 			}
 
 			T record = loadResult.Record;
 
 			if ((record.Terms == null) || (record.Terms.Count == 0))
-				return new ValidationResult() { Result = SpfQualifier.Neutral, Explanation = String.Empty };
+				return new ValidationResult() { Result = SpfQualifier.Neutral, Explanation = "No Terms defined" };
 
 			if (record.Terms.OfType<SpfModifier>().GroupBy(m => m.Type).Where(g => (g.Key == SpfModifierType.Exp) || (g.Key == SpfModifierType.Redirect)).Any(g => g.Count() > 1))
-				return new ValidationResult() { Result = SpfQualifier.PermError, Explanation = String.Empty };
+				return new ValidationResult() { Result = SpfQualifier.PermError, Explanation = "Exp and/or Redirect modifiers found" };
 
-			ValidationResult result = new ValidationResult() { Result = loadResult.ErrorResult };
+			ValidationResult result = new ValidationResult() { Result = loadResult.ErrorResult, Explanation = "N/a" };
 
 			#region Evaluate mechanism
 			foreach (SpfMechanism mechanism in record.Terms.OfType<SpfMechanism>())
 			{
 				if (state.DnsLookupCount > DnsLookupLimit)
-					return new ValidationResult() { Result = SpfQualifier.PermError, Explanation = String.Empty };
+					return new ValidationResult() { Result = SpfQualifier.PermError, Explanation = "Too many lookups" };
 
 				SpfQualifier qualifier = await CheckMechanismAsync(mechanism, ip, domain, sender, state, token);
 
 				if (qualifier != SpfQualifier.None)
 				{
 					result.Result = qualifier;
+
+					if (result.Result == SpfQualifier.PermError || result.Result == SpfQualifier.SoftFail) {
+						result.Explanation = $"Result={result.Result}, Type={mechanism.Type}, Domain={mechanism.Domain}, LookupCount={state.DnsLookupCount}";
+					}
 					break;
 				}
 			}
+
+			if (state.DnsLookupCount > 10)
+				return new ValidationResult() { Result = SpfQualifier.PermError, Explanation = "Too many lookups" };
+
 			#endregion
 
 			#region Evaluate modifiers
@@ -196,7 +204,7 @@ namespace ARSoft.Tools.Net.Spf
 				if (redirectModifier != null)
 				{
 					if (++state.DnsLookupCount > 10)
-						return new ValidationResult() { Result = SpfQualifier.PermError, Explanation = String.Empty };
+						return new ValidationResult() { Result = SpfQualifier.PermError, Explanation = "Too many lookups" };
 
 					DomainName redirectDomain = await ExpandDomainAsync(redirectModifier.Domain ?? String.Empty, ip, domain, sender, token);
 
